@@ -4,11 +4,9 @@ import plotly.express as px
 import pandas as pd
 import base64
 import io
+from datetime import datetime, timedelta
 
 app = dash.Dash(__name__)
-
-# Инициализируем пустой DataFrame
-df = pd.read_csv("data.csv")
 
 app.layout = html.Div([
     html.H1("Дашборд процесса разработки ПО"),
@@ -33,6 +31,19 @@ app.layout = html.Div([
     # Компонент для хранения данных в памяти
     dcc.Store(id='storage', data=None),
     
+    # Выпадающий список для выбора периода
+    html.H2("Выберите период для анализа"),
+    dcc.Dropdown(
+        id='period-selector',
+        options=[
+            {'label': 'Последние 7 дней', 'value': 7},
+            {'label': 'Последние 30 дней', 'value': 30},
+            {'label': 'Последние 90 дней', 'value': 90},
+            {'label': 'Все данные', 'value': 0}
+        ],
+        value=30  # значение по умолчанию - последние 30 дней
+    ),
+    
     # 1 
     html.H2("График временного ряда"),
     dcc.Graph(id='time-series-chart'),
@@ -47,21 +58,7 @@ app.layout = html.Div([
     
     # 4 
     html.H2("Таблица с данными"),
-    html.Div(id='data-table'),
-    
-    # 5 
-    html.H2("Выпадающий список для выбора периода"),
-    dcc.Dropdown(
-        id='period-selector',
-        options=[
-            {'label': 'День', 'value': 'D'},
-            {'label': 'Неделя', 'value': 'W'}, 
-            {'label': 'Месяц', 'value': 'M'}, 
-            {'label': 'Квартал', 'value': 'Q'}, 
-            {'label': 'Год', 'value': 'YE'}
-        ],
-        value='D' # значение по умолчанию
-    )
+    html.Div(id='data-table')
 ])
 
 # Callback для обработки загруженного файла
@@ -83,16 +80,31 @@ def update_storage(contents, filename):
             return None
     return None
 
+# Функция для фильтрации данных по периоду
+def filter_data_by_period(data, days):
+    if days == 0:  # Все данные
+        return data
+    
+    df = pd.DataFrame(data)
+    df['date'] = pd.to_datetime(df['date'])
+    
+    # Вычисляем дату, от которой будем фильтровать
+    cutoff_date = df['date'].max() - timedelta(days=days)
+    
+    # Фильтруем данные
+    filtered_df = df[df['date'] >= cutoff_date]
+    return filtered_df.to_dict('records')
+
 # Основной callback для обновления графиков
 @app.callback(
     [Output('time-series-chart', 'figure'),
-    Output('pie-chart', 'figure'),
-    Output('histogram-scatter', 'figure'),
-    Output('data-table', 'children')],
+     Output('pie-chart', 'figure'),
+     Output('histogram-scatter', 'figure'),
+     Output('data-table', 'children')],
     [Input('storage', 'data'),
-    Input('period-selector', 'value')]
+     Input('period-selector', 'value')]
 )
-def update_graphs(data, period):
+def update_graphs(data, period_days):
     if not data:
         # Возвращаем пустые графики если данных нет
         empty_fig = px.line(title="Загрузите данные для отображения")
@@ -100,22 +112,25 @@ def update_graphs(data, period):
         empty_hist = px.bar(title="Загрузите данные для отображения")
         return empty_fig, empty_pie, empty_hist, "Загрузите данные для отображения"
     
-    df = pd.DataFrame(data)
+    # Фильтруем данные по выбранному периоду
+    filtered_data = filter_data_by_period(data, period_days)
+    df = pd.DataFrame(filtered_data)
     
     # Преобразование данных
     df['date'] = pd.to_datetime(df['date'])
     
-    # Группировка по периоду для временного ряда
-    df_period = df.groupby(pd.Grouper(key='date', freq=period)).sum().reset_index()
+    # Группировка по дням для временного ряда
+    df_daily = df.groupby('date')[['new_tasks', 'completed_tasks']].sum().reset_index()
     
     # 1. График временного ряда - динамика задач
     time_series_fig = px.line(
-        df_period, 
+        df_daily, 
         x='date', 
         y=['new_tasks', 'completed_tasks'],
-        title='Динамика новых и завершенных задач',
+        title=f'Динамика новых и завершенных задач (период: {period_days} дней)',
         labels={'value': 'Количество задач', 'date': 'Дата', 'variable': 'Тип задач'}
     )
+    time_series_fig.update_layout(legend_title_text='Тип задач')
     
     # 2. Круговая диаграмма - распределение по статусам
     status_counts = df['status'].value_counts().reset_index()
@@ -124,7 +139,7 @@ def update_graphs(data, period):
         status_counts, 
         values='count', 
         names='status',
-        title='Распределение задач по статусам'
+        title=f'Распределение задач по статусам (период: {period_days} дней)'
     )
     
     # 3. Гистограмма - распределение усилий по разработчикам
@@ -133,19 +148,36 @@ def update_graphs(data, period):
         developer_effort,
         x='developer',
         y='effort_hours',
-        title='Распределение усилий по команде (часы)',
+        title=f'Распределение усилий по команде (период: {period_days} дней)',
         labels={'developer': 'Разработчик', 'effort_hours': 'Затраченные часы'}
     )
     
     # 4. Таблица с ключевыми показателями
+    # Создаем сводную таблицу с ключевыми метриками
+    summary_df = pd.DataFrame({
+        'Метрика': [
+            'Всего новых задач',
+            'Всего завершенных задач',
+            'Общие затраченные часы',
+            'Средние часы на задачу',
+            'Эффективность (завершено/новые)'
+        ],
+        'Значение': [
+            df['new_tasks'].sum(),
+            df['completed_tasks'].sum(),
+            df['effort_hours'].sum(),
+            round(df['effort_hours'].sum() / max(df['new_tasks'].sum(), 1), 2),
+            f"{round(df['completed_tasks'].sum() / max(df['new_tasks'].sum(), 1) * 100, 1)}%"
+        ]
+    })
+    
     table = dash_table.DataTable(
-        data=df.to_dict('records'),
-        columns=[{'name': col, 'id': col} for col in df.columns],
-        page_size=10,
+        data=summary_df.to_dict('records'),
+        columns=[{'name': col, 'id': col} for col in summary_df.columns],
         style_table={'overflowX': 'auto'},
         style_cell={
             'textAlign': 'left',
-            'minWidth': '100px', 'width': '100px', 'maxWidth': '180px',
+            'minWidth': '150px', 'width': '150px', 'maxWidth': '200px',
             'overflow': 'hidden',
             'textOverflow': 'ellipsis',
         }
