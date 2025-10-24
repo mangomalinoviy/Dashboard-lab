@@ -102,14 +102,8 @@ app.layout = html.Div(style={'backgroundColor': colors['background'], 'padding':
             html.H3("👥 Распределение усилий по команде", style={'color': colors['text'], 'marginBottom': '15px'}),
             dcc.Graph(id='histogram-scatter')
         ], className="six columns", style={'backgroundColor': colors['card_bg'], 'padding': '20px', 'borderRadius': '10px', 'boxShadow': '0 4px 6px rgba(0,0,0,0.1)'}),
-        
-        # Приоритеты задач
-        html.Div([
-            html.H3("🎯 Распределение по приоритетам", style={'color': colors['text'], 'marginBottom': '15px'}),
-            dcc.Graph(id='priority-chart')
-        ], className="six columns", style={'backgroundColor': colors['card_bg'], 'padding': '20px', 'borderRadius': '10px', 'boxShadow': '0 4px 6px rgba(0,0,0,0.1)'}),
     ], className="row", style={'marginBottom': '30px'}),
-    
+
     # Таблица с данными
     html.Div([
         html.H3("📋 Детальные данные", style={'color': colors['text'], 'marginBottom': '15px'}),
@@ -203,7 +197,6 @@ def update_kpi_cards(data, period_days):
     [Output('time-series-chart', 'figure'),
      Output('pie-chart', 'figure'),
      Output('histogram-scatter', 'figure'),
-     Output('priority-chart', 'figure'),
      Output('data-table', 'children')],
     [Input('storage', 'data'),
      Input('period-selector', 'value')]
@@ -267,24 +260,7 @@ def update_graphs(data, period_days):
         paper_bgcolor='rgba(0,0,0,0)',
         plot_bgcolor='rgba(0,0,0,0)'
     )
-    
-    # 4. Диаграмма приоритетов
-    priority_counts = df['priority'].value_counts().reset_index()
-    priority_counts.columns = ['priority', 'count']
-    priority_fig = px.bar(
-        priority_counts,
-        x='priority',
-        y='count',
-        title='',
-        labels={'priority': 'Приоритет', 'count': 'Количество задач'},
-        color='priority',
-        color_discrete_map={'Высокий': colors['accent'], 'Средний': '#f39c12', 'Низкий': colors['secondary']}
-    )
-    priority_fig.update_layout(
-        paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(0,0,0,0)'
-    )
-    
+
     # 5. Таблица с данными
     table = dash_table.DataTable(
         data=df.to_dict('records'),
@@ -312,7 +288,7 @@ def update_graphs(data, period_days):
         ]
     )
     
-    return time_series_fig, pie_fig, histogram_fig, priority_fig, table
+    return time_series_fig, pie_fig, histogram_fig, table
 
 if __name__ == '__main__':
     app.run(debug=True)
